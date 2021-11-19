@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+    <style>
+
+        .wrapper {
+            max-width: 50rem;
+            margin: 1rem auto;
+            padding: .2rem 1rem;
+
+            border: 2px solid #444;
+            background: rgba(0, 255, 102, 0.8);
+        }
+
+        .dropzone {
+            box-sizing: border-box;
+            display: none;
+            position: fixed;
+            width: 100%;
+            height: 100%;
+            left: 0;
+            top: 0;
+            z-index: 99999;
+
+            background: rgba(0, 255, 102, 0.8);
+            border: 11px dashed #60a7dc;;
+        }
+    </style>
+</head>
+<body>
+<div id="dropzone" class="dropzone"></div>
+
+<div class="wrapper">
+
+    <div class="pen_info">
+
+
+    </div>
+</div>
+<script>
+
+
+    var dropZone = document.getElementById('dropzone');
+
+    function showDropZone() {
+        dropZone.style.display = "block";
+    }
+
+    function hideDropZone() {
+        dropZone.style.display = "none";
+    }
+
+    function allowDrag(e) {
+        e.dataTransfer.dropEffect = 'copy';
+        e.preventDefault();
+    }
+
+    function handleDrop(ev) {
+
+        // Prevent default behavior (Prevent file from being opened)
+        ev.preventDefault();
+
+        if (ev.dataTransfer.items) {
+            // Use DataTransferItemList interface to access the file(s)
+            for (var i = 0; i < ev.dataTransfer.items.length; i++) {
+                // If dropped items aren't files, reject them
+                if (ev.dataTransfer.items[i].kind === 'file') {
+                    var file = ev.dataTransfer.items[i].getAsFile();
+                    let reader = new FileReader();
+
+                    // Closure to capture the file information.
+                    reader.onload = (function () {
+                        return function (e) {
+
+                            process_data(file.name, e.target.result);
+                        };
+                    })(file);
+                    // Read in the image file as a data URL.
+                    reader.readAsText(file);
+                }
+            }
+        } else {
+            // Use DataTransfer interface to access the file(s)
+            for (var i = 0; i < ev.dataTransfer.files.length; i++) {
+                var nam = ev.dataTransfer.files[i].name;
+                var data = ev.dataTransfer.files[i].getData("text");
+                console.log(data)
+            }
+        }
+        hideDropZone();
+    }
+
+    window.addEventListener('dragenter', function (e) {
+        showDropZone();
+    });
+
+    dropZone.addEventListener('dragenter', allowDrag);
+    dropZone.addEventListener('dragover', allowDrag);
+
+    dropZone.addEventListener('dragleave', function (e) {
+        console.log('dragleave');
+        hideDropZone();
+    });
+    dropZone.addEventListener('drop', handleDrop);
+
+
+    ////////
+    // adapted from https://stackoverflow.com/a/14991797/960471
+    function parseCSV(str) {
+        var arr = [];
+        var quote = false;  // 'true' means we're inside a quoted field
+
+        // Iterate over each character, keep track of current row and column (of the returned array)
+        for (var row = 0, col = 0, c = 0; c < str.length; c++) {
+            var cc = str[c], nc = str[c + 1];        // Current character, next character
+            arr[row] = arr[row] || [];             // Create a new row if necessary
+            arr[row][col] = arr[row][col] || '';   // Create a new column (start with empty string) if necessary
+
+            // If the current character is a quotation mark, and we're inside a
+            // quoted field, and the next character is also a quotation mark,
+            // add a quotation mark to the current column and skip the next character
+            if (cc === '"' && quote && nc === '"') {
+                arr[row][col] += cc;
+                ++c;
+                continue;
+            }
+
+            // If it's just one quotation mark, begin/end quoted field
+            if (cc === '"') {
+                quote = !quote;
+                continue;
+            }
+
+            // If it's a comma and we're not in a quoted field, move on to the next column
+            if (cc === ',' && !quote) {
+                ++col;
+                continue;
+            }
+
+            // If it's a newline (CRLF) and we're not in a quoted field, skip the next character
+            // and move on to the next row and move to column 0 of that new row
+            if (cc === '\r' && nc === '\n' && !quote) {
+                ++row;
+                col = 0;
+                ++c;
+                continue;
+            }
+
+            // If it's a newline (LF or CR) and we're not in a quoted field,
+            // move on to the next row and move to column 0 of that new row
+            if (cc === '\n' && !quote) {
+                ++row;
+                col = 0;
+                continue;
+            }
+            if (cc === '\r' && !quote) {
+                ++row;
+                col = 0;
+                continue;
+            }
+
+            // Otherwise, append the current character to the current column
+            arr[row][col] += cc;
+        }
+        return arr;
+    }
+
+    function process_data(file_nam, data) {
+        var parsed = parseCSV(data);
+        var headers = parsed[0].shift();
+
+        var participants = seperate_participants(headers, parsed)
+    }
+
+    function seperate_participants(headers, parsed) {
+        var zone_type_i = headers.indexOf('Zone type');
+        var schedule_id_i = headers.indexOf('Schedule ID');
+        var sj_id_i = headers.indexOf('Participant Private ID');
+        var rt_id_i = headers.indexOf('Reaction Time');
+
+        var schedule_ids = [];
+        var participants = {}
+        var row, zone_type, trial_info;
+        var sj, preceeding_sj;
+        var rt, preceeding_rt;
+        var scheduled_id, preceeding_scheduled_id;
+
+        for (row = 0; row < parsed.length; row++) {
+            zone_type = parsed[row][zone_type_i];
+            scheduled_id = parsed[row][schedule_id_i];
+            sj = parsed[row][sj_id_i];
+            rt = parsed[row][rt_id_i];
+
+            if(!participants[sj]){
+                participants[sj] = [];
+            }
+
+            trial_info = {
+
+            }
+
+            if(sj === preceeding_sj){
+                trial_info['preceeding_scheduled_id__scheduled_id'] = preceeding_scheduled_id + '_' + scheduled_id;
+                if(rt) {
+                    if(preceeding_rt) {
+                        trial_info['trial_rt_dif'] = pre
+                    }
+                }
+            }
+
+            participants[sj].append(trial_info)
+            preceeding_scheduled_id = scheduled_id;
+            preceeding_rt = rt;
+            preceeding_sj = sj;
+
+        }
+    }
+</script>
+</body>
+</html>
