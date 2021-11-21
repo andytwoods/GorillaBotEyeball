@@ -27,17 +27,45 @@
             background: rgba(0, 255, 102, 0.8);
             border: 11px dashed #60a7dc;;
         }
+
+        *[hidden] {
+            display: none;
+        }
+
+        #tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, .7);
+            color: #fff;
+            padding: 2px 5px;
+            font-size: 12px;
+            white-space: nowrap;
+            z-index: 9999;
+        }
+
+        .sparkline--line {
+            stroke: #024166;
+        }
+
+        .sparkline--cursor {
+            stroke: orange;
+        }
+
+        .sparkline--spot {
+            fill: red;
+            stroke: red;
+        }
     </style>
+    <script src="js/sparkline.js"></script>
 </head>
 <body>
 <div id="dropzone" class="dropzone"></div>
 
-<div class="wrapper">
+<div class="">
 
-    <div class="pen_info">
-
-
-    </div>
+    Drop some Gorilla data
+</div>
+<div id="graph_container">
+    <span id="tooltip" hidden="true"></span>
 </div>
 <script>
 
@@ -61,10 +89,10 @@
 
         // Prevent default behavior (Prevent file from being opened)
         ev.preventDefault();
-
+        var i;
         if (ev.dataTransfer.items) {
             // Use DataTransferItemList interface to access the file(s)
-            for (var i = 0; i < ev.dataTransfer.items.length; i++) {
+            for (i = 0; i < ev.dataTransfer.items.length; i++) {
                 // If dropped items aren't files, reject them
                 if (ev.dataTransfer.items[i].kind === 'file') {
                     var file = ev.dataTransfer.items[i].getAsFile();
@@ -73,7 +101,6 @@
                     // Closure to capture the file information.
                     reader.onload = (function () {
                         return function (e) {
-
                             process_data(file.name, e.target.result);
                         };
                     })(file);
@@ -82,11 +109,11 @@
                 }
             }
         } else {
+            throw 'not implemented yet -- used for clipboard?'
             // Use DataTransfer interface to access the file(s)
-            for (var i = 0; i < ev.dataTransfer.files.length; i++) {
+            for (i = 0; i < ev.dataTransfer.files.length; i++) {
                 var nam = ev.dataTransfer.files[i].name;
                 var data = ev.dataTransfer.files[i].getData("text");
-                console.log(data)
             }
         }
         hideDropZone();
@@ -100,7 +127,6 @@
     dropZone.addEventListener('dragover', allowDrag);
 
     dropZone.addEventListener('dragleave', function (e) {
-        console.log('dragleave');
         hideDropZone();
     });
     dropZone.addEventListener('drop', handleDrop);
@@ -112,35 +138,26 @@
         var arr = [];
         var quote = false;  // 'true' means we're inside a quoted field
 
-        // Iterate over each character, keep track of current row and column (of the returned array)
         for (var row = 0, col = 0, c = 0; c < str.length; c++) {
             var cc = str[c], nc = str[c + 1];        // Current character, next character
             arr[row] = arr[row] || [];             // Create a new row if necessary
             arr[row][col] = arr[row][col] || '';   // Create a new column (start with empty string) if necessary
 
-            // If the current character is a quotation mark, and we're inside a
-            // quoted field, and the next character is also a quotation mark,
-            // add a quotation mark to the current column and skip the next character
             if (cc === '"' && quote && nc === '"') {
                 arr[row][col] += cc;
                 ++c;
                 continue;
             }
 
-            // If it's just one quotation mark, begin/end quoted field
             if (cc === '"') {
                 quote = !quote;
                 continue;
             }
-
-            // If it's a comma and we're not in a quoted field, move on to the next column
             if (cc === ',' && !quote) {
                 ++col;
                 continue;
             }
 
-            // If it's a newline (CRLF) and we're not in a quoted field, skip the next character
-            // and move on to the next row and move to column 0 of that new row
             if (cc === '\r' && nc === '\n' && !quote) {
                 ++row;
                 col = 0;
@@ -148,8 +165,6 @@
                 continue;
             }
 
-            // If it's a newline (LF or CR) and we're not in a quoted field,
-            // move on to the next row and move to column 0 of that new row
             if (cc === '\n' && !quote) {
                 ++row;
                 col = 0;
@@ -161,60 +176,169 @@
                 continue;
             }
 
-            // Otherwise, append the current character to the current column
             arr[row][col] += cc;
         }
         return arr;
     }
 
     function process_data(file_nam, data) {
-        var parsed = parseCSV(data);
-        var headers = parsed[0].shift();
 
-        var participants = seperate_participants(headers, parsed)
+        var parsed = parseCSV(data);
+        var headers = parsed.shift();
+
+        var participants_uniqueHeaders = separate_participants(headers, parsed);
+        sparklines(participants_uniqueHeaders['participants'], participants_uniqueHeaders['unique headers']);
     }
 
-    function seperate_participants(headers, parsed) {
-        var zone_type_i = headers.indexOf('Zone type');
+    function separate_participants(headers, parsed) {
+        var zone_type_i = headers.indexOf('Zone Type');
         var schedule_id_i = headers.indexOf('Schedule ID');
         var sj_id_i = headers.indexOf('Participant Private ID');
         var rt_id_i = headers.indexOf('Reaction Time');
+        var trial_number_i = headers.indexOf('Trial Number');
 
-        var schedule_ids = [];
         var participants = {}
-        var row, zone_type, trial_info;
-        var sj, preceeding_sj;
-        var rt, preceeding_rt;
-        var scheduled_id, preceeding_scheduled_id;
+        var row, zone_type, trial_number, unique_id;
+        var sj, preceeding_sj, rt, scheduled_id;
+
+        var max_rt = 0;
+
+        var standarise_RTs_over_SJs = 'STANDARDISE RTs OVER SJs'
+        var unique_headers = [standarise_RTs_over_SJs];
 
         for (row = 0; row < parsed.length; row++) {
             zone_type = parsed[row][zone_type_i];
             scheduled_id = parsed[row][schedule_id_i];
+
+            trial_number = parsed[row][trial_number_i];
             sj = parsed[row][sj_id_i];
             rt = parsed[row][rt_id_i];
-
-            if(!participants[sj]){
-                participants[sj] = [];
+            if (!participants[sj]) {
+                participants[sj] = {};
             }
+            unique_id = trial_number + ' ' + zone_type;
+            participants[sj][unique_id] = {
+                'rt': rt,
+                'type': zone_type,
+            };
 
-            trial_info = {
+            if (max_rt < rt) max_rt = rt;
 
-            }
+            if (unique_headers.indexOf(unique_id) === -1) unique_headers.push(unique_id);
 
-            if(sj === preceeding_sj){
-                trial_info['preceeding_scheduled_id__scheduled_id'] = preceeding_scheduled_id + '_' + scheduled_id;
-                if(rt) {
-                    if(preceeding_rt) {
-                        trial_info['trial_rt_dif'] = pre
-                    }
-                }
-            }
-
-            participants[sj].append(trial_info)
-            preceeding_scheduled_id = scheduled_id;
-            preceeding_rt = rt;
             preceeding_sj = sj;
 
+        }
+
+        // let's add the max RT to each participant to standardise graph y-axis
+        for (var participant_label in participants) {
+            participants[participant_label][standarise_RTs_over_SJs] = {'rt': max_rt, 'type': standarise_RTs_over_SJs}
+        }
+
+
+        unique_headers = unique_headers.filter(function (value, index, arr) {
+            return value.indexOf('END TASK') === -1;
+        });
+
+
+        return {'participants': participants, 'unique headers': unique_headers};
+    }
+
+    var svgNS = "http://www.w3.org/2000/svg";
+
+    function create_svg(my_class) {
+        var svg = document.createElementNS(svgNS, "svg");
+        svg.setAttribute("class", my_class);
+        svg.setAttribute("width", "200");
+        svg.setAttribute("height", "100");
+        svg.setAttribute("stroke-width", "2");
+        svg.setAttribute("fill", "#5cceee");
+        svg.setAttribute("stroke-width", "2");
+
+        return svg;
+    }
+
+    function findClosest(target, tagName) {
+        if (target.tagName === tagName) {
+            return target;
+        }
+
+        while ((target = target.parentNode)) {
+            if (target.tagName === tagName) {
+                break;
+            }
+        }
+        return target;
+    }
+
+    function getOffset(el) {
+        const rect = el.getBoundingClientRect();
+        return {
+            left: rect.left + window.scrollX,
+            top: rect.top + window.scrollY
+        };
+    }
+
+    function sparklines(participants, headers) {
+        var options = {
+            onmousemove(event, datapoint) {
+                var svg = findClosest(event.target, "svg");
+                var tooltip = document.getElementById('tooltip');
+
+                tooltip.hidden = false;
+                tooltip.textContent = datapoint.value + 'ms \n' + datapoint.schedule+'\n' + datapoint.sj;
+                tooltip.style.top = event.clientY + 'px';
+                tooltip.style.left = (event.clientX + 20).toString() + 'px';
+            },
+
+            onmouseout() {
+                var svg = findClosest(event.target, "svg");
+                var tooltip = document.getElementById('tooltip');
+
+                tooltip.hidden = true;
+            }
+        };
+
+
+        for (var sj_id in participants) {
+
+            var rejiggled = [];
+            var sj = participants[sj_id];
+
+            for (var i = 0; i < headers.length; i++) {
+                var data_point_info_label = headers[i];
+                var data_point_info = sj[data_point_info_label];
+                if (!data_point_info) continue;
+                var value = data_point_info['rt'];
+
+                var my_name = data_point_info['type'];
+                if (!my_name || my_name.length === 0) {
+                    my_name = data_point_info_label;
+                }
+                if (!value || value.length === 0) {
+                    value = 0;
+                }
+                rejiggled.push({
+                    'name': my_name,
+                    'sj': sj_id,
+                    'value': parseInt(value),
+                    'schedule': data_point_info_label
+                })
+
+
+            }
+            if (rejiggled.length > 0) {
+                var svg = create_svg(sj_id);
+                var container_svg = document.createElement("div");
+                container_svg.style.display = 'inline';
+                var title = document.createElement("span");
+                title.innerText = sj_id;
+                container_svg.appendChild(svg);
+                //container_svg.appendChild(title);
+                document.getElementById("graph_container").appendChild(container_svg);
+
+                sparkline.sparkline(svg, rejiggled, options);
+            }
         }
     }
 </script>
